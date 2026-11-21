@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Guard, { GuardMeta } from "@/components/Guard";
-import { createBatch, listBatches } from "@/lib/data";
+import { createBatch, listBatches, TrackType } from "@/lib/data";
 import {
   ConceptNode,
   extractConceptsFromMaterial,
@@ -14,7 +14,9 @@ import {
 function Form({ uid, meta }: { uid: string; meta: GuardMeta }) {
   const router = useRouter();
   const [title, setTitle] = useState("");
+  const [trackType, setTrackType] = useState<TrackType>("competitive");
   const [exam, setExam] = useState("UPSC");
+  const [department, setDepartment] = useState("");
   const [language, setLanguage] = useState("en");
   const [notesText, setNotesText] = useState("");
   const [conceptsText, setConceptsText] = useState("");
@@ -110,6 +112,8 @@ function Form({ uid, meta }: { uid: string; meta: GuardMeta }) {
       const id = await createBatch({
         teacherUid: uid,
         title: title.trim(),
+        trackType,
+        department: department.trim() || undefined,
         exam,
         language,
         docHash,
@@ -163,17 +167,67 @@ function Form({ uid, meta }: { uid: string; meta: GuardMeta }) {
           />
         </div>
 
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
+            Learning Track
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setTrackType("competitive");
+                setExam("UPSC");
+              }}
+              className={`rounded-lg border p-2.5 text-left text-xs transition ${
+                trackType === "competitive"
+                  ? "border-brand bg-purple-50 font-semibold text-brand"
+                  : "bg-white text-gray-700"
+              }`}
+            >
+              <div>Competitive Exams</div>
+              <div className="mt-0.5 text-[11px] font-normal text-gray-500">
+                UPSC, MPSC, GATE, NEET, JEE, SSC
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTrackType("academic");
+                setExam("Engineering / B.Tech");
+              }}
+              className={`rounded-lg border p-2.5 text-left text-xs transition ${
+                trackType === "academic"
+                  ? "border-brand bg-purple-50 font-semibold text-brand"
+                  : "bg-white text-gray-700"
+              }`}
+            >
+              <div>School / College / Institution</div>
+              <div className="mt-0.5 text-[11px] font-normal text-gray-500">
+                Class 8–12, B.Tech, MBBS, University
+              </div>
+            </button>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
-              Target Exam
+              {trackType === "competitive" ? "Target Exam" : "Program / Level"}
             </label>
             <select
               className="w-full rounded-lg border p-2.5 text-sm"
               value={exam}
               onChange={(e) => setExam(e.target.value)}
             >
-              {["UPSC", "MPSC", "GATE", "NEET", "GENERAL"].map((x) => (
+              {(trackType === "competitive"
+                ? ["UPSC", "MPSC", "GATE", "NEET", "JEE", "SSC", "GENERAL"]
+                : [
+                    "School (Class 8-12)",
+                    "Engineering / B.Tech",
+                    "Medical / MBBS",
+                    "University / Degree",
+                  ]
+              ).map((x) => (
                 <option key={x}>{x}</option>
               ))}
             </select>
@@ -193,6 +247,20 @@ function Form({ uid, meta }: { uid: string; meta: GuardMeta }) {
             </select>
           </div>
         </div>
+
+        {trackType === "academic" && (
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
+              Class / Department / Semester (Optional)
+            </label>
+            <input
+              className="w-full rounded-lg border p-2.5 text-sm"
+              placeholder="e.g. Sem 4 CSE · Section A"
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+            />
+          </div>
+        )}
 
         <div className="rounded-xl border border-dashed border-purple-300 bg-purple-50/40 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">

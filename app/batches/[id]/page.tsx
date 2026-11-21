@@ -6,9 +6,13 @@ import Guard, { GuardMeta } from "@/components/Guard";
 import Heatmap from "@/components/Heatmap";
 import {
   Batch,
+  BatchMember,
   getBatch,
   getStats,
+  provisionStudentForBatch,
   recordStudentDiagnostic,
+  subscribeBatchMembers,
+  subscribeBatchStats,
 } from "@/lib/data";
 import {
   bottlenecks,
@@ -20,7 +24,9 @@ import {
   total,
 } from "@/lib/heatmap";
 
-const BASE = process.env.NEXT_PUBLIC_SHARE_BASE ?? "https://conceptify.app/batch";
+const BASE =
+  process.env.NEXT_PUBLIC_SHARE_BASE ??
+  "https://conceptify-ai-admin-dashboard.vercel.app/batches";
 
 type PreviewQuestion = {
   difficulty: 1 | 2 | 3;
@@ -71,7 +77,20 @@ function Detail({ uid, meta }: { uid: string; meta: GuardMeta }) {
   const { id } = useParams<{ id: string }>();
   const [batch, setBatch] = useState<Batch | null | undefined>(undefined);
   const [stats, setStats] = useState<ConceptStat[]>([]);
+  const [members, setMembers] = useState<BatchMember[]>([]);
   const [copied, setCopied] = useState(false);
+
+  // Admin student provisioning state
+  const [stuName, setStuName] = useState("");
+  const [stuEmail, setStuEmail] = useState("");
+  const [stuPassword, setStuPassword] = useState("");
+  const [enrolling, setEnrolling] = useState(false);
+  const [enrollErr, setEnrollErr] = useState("");
+  const [provisionedCreds, setProvisionedCreds] = useState<{
+    studentName: string;
+    email: string;
+    password: string;
+  } | null>(null);
 
   // Student diagnostic simulator state
   const [selectedConceptId, setSelectedConceptId] = useState("");
@@ -105,6 +124,49 @@ function Detail({ uid, meta }: { uid: string; meta: GuardMeta }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!batch) return;
+    const unsubStats = subscribeBatchStats(batch, (live) => setStats(live));
+    const unsubMembers = subscribeBatchMembers(batch.id, (list) => setMembers(list));
+    return () => {
+      unsubStats();
+      unsubMembers();
+    };
+  }, [batch]);
+
+  async function enrollStudent(e: React.FormEvent) {
+    e.preventDefault();
+    if (!batch) return;
+    setEnrolling(true);
+    setEnrollErr("");
+    setProvisionedCreds(null);
+    try {
+      const res = await provisionStudentForBatch({
+        batchId: batch.id,
+        studentName: stuName,
+        email: stuEmail,
+        password: stuPassword,
+        exam: batch.exam,
+        language: batch.language,
+      });
+      setProvisionedCreds(res);
+      setStuName("");
+      setStuEmail("");
+      setStuPassword("");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      setEnrollErr(
+        msg.includes("email-already-in-use")
+          ? "This email already has an account."
+          : msg.includes("weak-password")
+          ? "Password must be at least 6 characters."
+          : "Could not create student account. Check email & password."
+      );
+    } finally {
+      setEnrolling(false);
+    }
+  }
 
   if (batch === undefined) return <p className="text-gray-500">Loading…</p>;
   if (batch === null) {
@@ -341,6 +403,118 @@ function Detail({ uid, meta }: { uid: string; meta: GuardMeta }) {
           </div>
         </div>
       )}
+
+      {/* Admin Student Provisioning (ID & Password) + Per-Student Analytics */}
+      <div className="grid gap-5 lg:grid-cols-2 print:hidden">
+        <form
+          onSubmit={enrollStudent}
+          className="space-y-3 rounded-xl border bg-white p-5"
+        >
+          <div className="text-base font-bold">
+            Enroll Student (Assign ID &amp; Password)
+          </div>
+          <p className="text-xs text-gray-500">
+            Create a student login and assign them to this batch. When they sign
+            into the Conceptify AI app, this batch appears automatically on
+            their dashboard.
+          </p>
+          <input
+            className="w-full rounded-lg border p-2 text-sm"
+            placeholder="Student Full Name"
+            value={stuName}
+            onChange={(e) => setStuName(e.target.value)}
+            required
+          />
+          <input
+            className="w-full rounded-lg border p-2 text-sm"
+            type="email"
+            placeholder="student@email.com"
+            value={stuEmail}
+            onChange={(e) => setStuEmail(e.target.value)}
+            required
+          />
+          <input
+            className="w-full rounded-lg border p-2 text-sm"
+            type="text"
+            placeholder="Temporary Password (min 6 chars)"
+            value={stuPassword}
+            onChange={(e) => setStuPassword(e.target.value)}
+            required
+          />
+          {enrollErr && <p className="text-xs text-red-600">{enrollErr}</p>}
+          {provisionedCreds && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+              <b>Enrolled {provisionedCreds.studentName}!</b> Share these login
+              credentials:
+              <div className="mt-1 font-mono">
+                ID: {provisionedCreds.email} · Pass: {provisionedCreds.password}
+              </div>
+            </div>
+          )}
+          <button
+            disabled={enrolling}
+            className="rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
+          >
+            {enrolling ? "Creating Student Account…" : "Create & Assign Student"}
+          </button>
+        </form>
+
+        <div className="rounded-xl border bg-white p-5">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-base font-bold">
+              Student Roster &amp; Guess-Risk ({members.length})
+            </div>
+            <span className="text-[11px] text-gray-500">Live Firestore</span>
+          </div>
+          {members.length === 0 ? (
+            <p className="text-xs text-gray-500">
+              No enrolled students yet. Add a student on the left or share the
+              batch link.
+            </p>
+          ) : (
+            <div className="max-h-64 space-y-2 overflow-y-auto">
+              {members.map((m) => {
+                const completed = Object.keys(m.conceptStatuses).length;
+                const highGuess =
+                  m.answerCount >= 3 && m.guessCount / m.answerCount > 0.5;
+                const avgScore =
+                  Object.values(m.conceptScores).length === 0
+                    ? null
+                    : Math.round(
+                        Object.values(m.conceptScores).reduce((a, b) => a + b, 0) /
+                          Object.values(m.conceptScores).length
+                      );
+                return (
+                  <div
+                    key={m.uid}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2.5 text-xs"
+                  >
+                    <div>
+                      <div className="font-semibold text-gray-900">
+                        {m.studentName}
+                      </div>
+                      <div className="text-[11px] text-gray-500">{m.email}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {highGuess && (
+                        <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                          High Guess Rate
+                        </span>
+                      )}
+                      <span className="rounded bg-gray-100 px-2 py-0.5 font-medium">
+                        {completed}/{batch.concepts.length} done
+                      </span>
+                      {avgScore !== null && (
+                        <span className="font-bold text-brand">{avgScore}%</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Interactive Student Confidence Diagnostic Preview & Live Rollup */}
       <div className="rounded-xl border bg-white p-5 print:hidden">
