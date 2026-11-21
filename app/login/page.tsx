@@ -1,10 +1,11 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { FIREBASE_READY } from "@/lib/firebase";
 
 export default function Login() {
-  const { login, signup, forbidden } = useAuth();
+  const { uid, loading, login, signup, forbidden } = useAuth();
   const router = useRouter();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [name, setName] = useState("");
@@ -12,6 +13,12 @@ export default function Login() {
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!loading && uid) {
+      router.replace("/batches");
+    }
+  }, [loading, uid, router]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -25,14 +32,22 @@ export default function Login() {
       }
       router.replace("/batches");
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "";
-      setErr(
-        msg.includes("email-already-in-use")
-          ? "This email is already registered. Try signing in."
-          : msg.includes("weak-password")
-          ? "Password must be at least 6 characters."
-          : "Could not authenticate. Check your email and password."
-      );
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes("not-a-teacher")) {
+        setErr("This account is registered as a student. Create a Teacher account instead.");
+      } else if (msg.includes("email-already-in-use")) {
+        setErr("This email is already registered. Switch to Sign In.");
+      } else if (msg.includes("weak-password")) {
+        setErr("Password must be at least 6 characters.");
+      } else if (msg.includes("invalid-credential") || msg.includes("user-not-found") || msg.includes("wrong-password")) {
+        setErr("Invalid email or password. If you are new, click 'Create Teacher Account' above.");
+      } else if (msg.includes("operation-not-allowed")) {
+        setErr("Email/Password sign-in is disabled in Firebase Console → Authentication → Sign-in method.");
+      } else if (msg.includes("Firebase is not configured")) {
+        setErr("Firebase environment variables are missing in Vercel settings.");
+      } else {
+        setErr(`Sign-in error: ${msg}`);
+      }
       setBusy(false);
     }
   }
@@ -76,6 +91,14 @@ export default function Login() {
           Create Teacher Account
         </button>
       </div>
+
+      {!FIREBASE_READY && (
+        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
+          Firebase environment variables are not set. Add{" "}
+          <code>NEXT_PUBLIC_FIREBASE_*</code> in Vercel / Hostinger settings
+          and redeploy.
+        </p>
+      )}
 
       {forbidden && (
         <p className="mb-4 rounded-lg border border-red-200 bg-red-50 p-2.5 text-sm text-red-700">

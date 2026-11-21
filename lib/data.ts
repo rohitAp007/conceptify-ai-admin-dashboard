@@ -16,7 +16,16 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-import { db, firebaseConfig } from "./firebase";
+import { db as rawDb, firebaseConfig } from "./firebase";
+
+function requireDb() {
+  if (!rawDb) {
+    throw new Error(
+      "Firebase is not configured. Set NEXT_PUBLIC_FIREBASE_* environment variables."
+    );
+  }
+  return rawDb;
+}
 import type {
   ConceptNode,
   ConceptStat,
@@ -83,6 +92,7 @@ export function setInstituteName(name: string): void {
 }
 
 export async function createBatch(b: NewBatch): Promise<string> {
+  const db = requireDb();
   const ref = await addDoc(collection(db, "batches"), {
     ...b,
     trackType: b.trackType ?? "competitive",
@@ -129,6 +139,7 @@ export async function createStarterBatch(teacherUid: string): Promise<string> {
 }
 
 export async function listBatches(teacherUid: string): Promise<Batch[]> {
+  const db = requireDb();
   const snap = await getDocs(
     query(collection(db, "batches"), where("teacherUid", "==", teacherUid))
   );
@@ -139,11 +150,13 @@ export async function listBatches(teacherUid: string): Promise<Batch[]> {
 }
 
 export async function getBatch(id: string): Promise<Batch | null> {
+  const db = requireDb();
   const s = await getDoc(doc(db, "batches", id));
   return s.exists() ? { id: s.id, ...(s.data() as Omit<Batch, "id">) } : null;
 }
 
 export async function getStats(batch: Batch): Promise<ConceptStat[]> {
+  const db = requireDb();
   const snap = await getDocs(collection(db, "batches", batch.id, "stats"));
   const byId = new Map(snap.docs.map((d) => [d.id, d.data()]));
   return batch.concepts.map((c) => {
@@ -165,6 +178,7 @@ export function subscribeBatchStats(
   batch: Batch,
   onUpdate: (stats: ConceptStat[]) => void
 ): () => void {
+  const db = requireDb();
   return onSnapshot(collection(db, "batches", batch.id, "stats"), (snap) => {
     const byId = new Map(snap.docs.map((d) => [d.id, d.data()]));
     onUpdate(
@@ -189,6 +203,7 @@ export function subscribeBatchMembers(
   batchId: string,
   onUpdate: (members: BatchMember[]) => void
 ): () => void {
+  const db = requireDb();
   return onSnapshot(collection(db, "batches", batchId, "members"), (snap) => {
     const list: BatchMember[] = snap.docs.map((d) => {
       const data = d.data();
@@ -224,6 +239,7 @@ export async function provisionStudentForBatch(params: {
   exam: string;
   language: string;
 }): Promise<{ uid: string; email: string; password: string; studentName: string }> {
+  const db = requireDb();
   const secApp =
     getApps().find((a) => a.name === "provisioner") ??
     initializeApp(firebaseConfig, "provisioner");
@@ -283,6 +299,7 @@ export async function recordStudentDiagnostic(
   conceptId: string,
   status: MasteryStatus
 ): Promise<void> {
+  const db = requireDb();
   const key = status.toLowerCase() as "knows" | "developing" | "struggles";
   const statRef = doc(db, "batches", batchId, "stats", conceptId);
   const batchRef = doc(db, "batches", batchId);
@@ -303,6 +320,7 @@ export async function recordStudentDiagnostic(
 }
 
 export async function isTeacher(uid: string): Promise<boolean> {
+  const db = requireDb();
   const s = await getDoc(doc(db, "users", uid));
   if (!s.exists()) return true;
   return s.data().role === "teacher" || s.data().role === "admin";
