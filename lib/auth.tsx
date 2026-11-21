@@ -1,7 +1,14 @@
 "use client";
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
-import { auth, MOCK_MODE } from "./firebase";
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+} from "firebase/auth";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { auth, db } from "./firebase";
 import { isTeacher } from "./data";
 
 type Ctx = {
@@ -10,10 +17,9 @@ type Ctx = {
   loading: boolean;
   forbidden: boolean;
   login: (email: string, pw: string) => Promise<void>;
+  signup: (email: string, pw: string, displayName: string) => Promise<void>;
   logout: () => Promise<void>;
-}; 
-
-
+};
 
 const AuthCtx = createContext<Ctx>(null as unknown as Ctx);
 export const useAuth = () => useContext(AuthCtx);
@@ -25,35 +31,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
-    if (MOCK_MODE || !auth) {
-      const u = localStorage.getItem("mock_uid");
-      if (u) { setUid(u); setEmail(u + "@demo.local"); }
-      setLoading(false);
-      return;
-    }
-    const fbAuth = auth;
-    return onAuthStateChanged(fbAuth, async (u) => {
+    return onAuthStateChanged(auth, async (u) => {
       if (u && !(await isTeacher(u.uid))) {
-        setForbidden(true); await signOut(fbAuth); setUid(null); setEmail(null);
+        setForbidden(true);
+        await signOut(auth);
+        setUid(null);
+        setEmail(null);
       } else {
-        setForbidden(false); setUid(u?.uid ?? null); setEmail(u?.email ?? null);
+        setForbidden(false);
+        setUid(u?.uid ?? null);
+        setEmail(u?.email ?? null);
       }
       setLoading(false);
     });
   }, []);
 
   const login = async (e: string, pw: string) => {
-    if (MOCK_MODE || !auth) {
-      const id = "teacher_demo";
-      localStorage.setItem("mock_uid", id); setUid(id); setEmail(e || id + "@demo.local");
-      return;
-    }
     await signInWithEmailAndPassword(auth, e, pw);
   };
+
+  const signup = async (e: string, pw: string, displayName: string) => {
+    const cred = await createUserWithEmailAndPassword(auth, e, pw);
+    if (displayName.trim()) {
+      await updateProfile(cred.user, { displayName: displayName.trim() });
+    }
+    await setDoc(doc(db, "users", cred.user.uid), {
+      uid: cred.user.uid,
+      role: "teacher",
+      displayName: displayName.trim() || e.split("@")[0],
+      preferredLanguage: "en",
+      targetExam: "GENERAL",
+      subscriptionTier: "free",
+      streakDays: 0,
+      createdAt: serverTimestamp(),
+    });
+  };
+
   const logout = async () => {
-    if (MOCK_MODE || !auth) { localStorage.removeItem("mock_uid"); setUid(null); return; }
     await signOut(auth);
   };
 
-  return <AuthCtx.Provider value={{ uid, email, loading, forbidden, login, logout }}>{children}</AuthCtx.Provider>;
+  return (
+    <AuthCtx.Provider
+      value={{ uid, email, loading, forbidden, login, signup, logout }}
+    >
+      {children}
+    </AuthCtx.Provider>
+  );
 }

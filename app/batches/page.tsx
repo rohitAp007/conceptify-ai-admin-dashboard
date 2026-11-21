@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Guard, { GuardMeta } from "@/components/Guard";
-import { Batch, getStats, listBatches } from "@/lib/data";
+import { Batch, createStarterBatch, getStats, listBatches } from "@/lib/data";
 import { bottlenecks, ConceptStat, TIER_LIMITS } from "@/lib/heatmap";
 
 const LANG_NAMES: Record<string, string> = {
@@ -15,6 +15,7 @@ function List({ uid, meta }: { uid: string; meta: GuardMeta }) {
   const [batches, setBatches] = useState<Batch[] | null>(null);
   const [statsMap, setStatsMap] = useState<Record<string, ConceptStat[]>>({});
   const [search, setSearch] = useState("");
+  const [trackFilter, setTrackFilter] = useState<"all" | "competitive" | "academic">("all");
   const [examFilter, setExamFilter] = useState("ALL");
   const [err, setErr] = useState("");
 
@@ -121,6 +122,32 @@ function List({ uid, meta }: { uid: string; meta: GuardMeta }) {
         </div>
       )}
 
+      <div className="mb-3 flex flex-wrap gap-2">
+        {(
+          [
+            ["all", "All Tracks"],
+            ["competitive", "Competitive Exams"],
+            ["academic", "School & College"],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => {
+              setTrackFilter(k);
+              setExamFilter("ALL");
+            }}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+              trackFilter === k
+                ? "bg-gray-900 text-white"
+                : "border bg-white text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <input
           type="search"
@@ -130,7 +157,7 @@ function List({ uid, meta }: { uid: string; meta: GuardMeta }) {
           className="flex-1 rounded-lg border bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
         />
         <div className="flex flex-wrap gap-1.5">
-          {["ALL", "UPSC", "MPSC", "GATE", "NEET", "GENERAL"].map((ex) => (
+          {["ALL", "UPSC", "MPSC", "GATE", "NEET", "School (Class 8-12)", "Engineering / B.Tech"].map((ex) => (
             <button
               key={ex}
               type="button"
@@ -150,14 +177,41 @@ function List({ uid, meta }: { uid: string; meta: GuardMeta }) {
       {err && <p className="text-red-600">{err}</p>}
       {batches === null && !err && <p className="text-gray-500">Loading…</p>}
       {batches?.length === 0 && (
-        <p className="text-gray-500">
-          No batches yet. Create one to upload lecture notes and share a link.
-        </p>
+        <div className="rounded-xl border bg-white p-6 text-center">
+          <p className="text-sm text-gray-600">
+            No batches in Firestore yet. Create a batch from your lecture notes
+            or launch a starter UPSC batch to test with the student app.
+          </p>
+          <div className="mt-4 flex justify-center gap-3">
+            <Link
+              href="/batches/new"
+              className="rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white"
+            >
+              + Create Custom Batch
+            </Link>
+            <button
+              type="button"
+              onClick={async () => {
+                await createStarterBatch(uid);
+                const list = await listBatches(uid);
+                setBatches(list);
+              }}
+              className="rounded-lg border px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              Create Starter UPSC Batch
+            </button>
+          </div>
+        </div>
       )}
 
       <ul className="space-y-3">
         {batches
-          ?.filter((b) => examFilter === "ALL" || b.exam === examFilter)
+          ?.filter(
+            (b) =>
+              trackFilter === "all" ||
+              (b.trackType ?? "competitive") === trackFilter
+          )
+          .filter((b) => examFilter === "ALL" || b.exam === examFilter)
           .filter(
             (b) =>
               !search.trim() ||
